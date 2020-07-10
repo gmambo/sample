@@ -1,0 +1,1280 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template deploys a VPC, with a pair of public and private subnets spread
+  across two Availability Zones. It deploys an internet gateway, with a default
+  route on the public subnets. It deploys a pair of NAT gateways (one in each
+  AZ), and default routes for them in the private subnets.
+Parameters:
+  KeyPair:
+    Type: String
+    Description: Enter key pair name
+  VPCName:
+    Type: String
+    Description: Enter VPC name
+  InstanceType:
+    Type: String
+    Description: Enter Instance type
+    AllowedValues:
+      - t2.small
+      - t3.small
+      - t3.medium
+      - t2.xlarge
+      - t3a.large
+      - m3.medium
+      - m4.large
+    Default: t3.small
+  EnvironmentName:
+    Type: String
+    Description: An environment name that is prefixed to resource names
+  ASGRoleName:
+    Type: String
+    Description: IAM role name for instances
+  InternetGatewayName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+  LoadBalancerName:
+    Description: Loadbalancer name
+    Type: String
+  TargetGroupName:
+    Description: Targetgroup name
+    Type: String
+  ASGLaunchConfigurationName:
+    Description: Launch configuration name
+    Type: String
+  SecurityGroupName:
+    Description: Security group name
+    Type: String
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.190.0.0/16
+  PublicSubnet1CIDR:
+    Description: >-
+      Please enter the IP range (CIDR notation) for the public subnet in the
+      first Availability Zone
+    Type: String
+    Default: 10.190.10.0/24
+  PublicSubnet2CIDR:
+    Description: >-
+      Please enter the IP range (CIDR notation) for the public subnet in the
+      second Availability Zone
+    Type: String
+    Default: 10.190.11.0/24
+  PrivateSubnet1CIDR:
+    Description: >-
+      Please enter the IP range (CIDR notation) for the private subnet in the
+      first Availability Zone
+    Type: String
+    Default: 10.190.20.0/24
+  PrivateSubnet2CIDR:
+    Description: >-
+      Please enter the IP range (CIDR notation) for the private subnet in the
+      second Availability Zone
+    Type: String
+    Default: 10.190.21.0/24
+  DomainName:
+    Type: String
+    Description: Enter domain name for Public hosted zone
+  SubDomainName:
+    Type: String
+    Description: Enter sub domain name for record set
+  IPRangeSSH:
+    Description: >-
+      [Required] Set the IP or IP range for SSH connectivity to machine ;
+      127.0.0.1/32 is configured by default to disable remote SSH access. Set
+      this to 0.0.0.0/0 to access secure shell from any IP.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 127.0.0.1/32
+    AllowedPattern: '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})$'
+    ConstraintDescription: Your IP Range for SSH must be a valid IP CIDR range of the form x.x.x.x/x.
+  IPRangeApplication:
+    Description: >-
+      [Required] Set this to 0.0.0.0/0 to allow anyone on the internet to access
+      the application, and 127.0.0.1/32 to disable public access to the
+      application. You can also configure specific IP address or IP Range access
+      here.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})$'
+    ConstraintDescription: >-
+      This value cannot be empty. Set this to 0.0.0.0/0 to allow anyone on the
+      internet to access the application, and 127.0.0.1/32 to disable public
+      access to the application.
+  InstancesDataDiskType:
+    Description: Select the disk type.
+    Type: String
+    Default: gp2
+    AllowedValues:
+      - standard
+      - gp2
+  InstancesDataDiskSize:
+    Description: 'Disk size in GB, this must be between 1 and 1024 GB.'
+    Type: Number
+    MinValue: '1'
+    MaxValue: '1024'
+    Default: '10'
+    ConstraintDescription: Your Data Disk Instance size must be between 1 and 1024 GB.
+  ApplicationPassword:
+    Description: >-
+      [Required] Admin password for WordPress - Between 8-32 characters; Include
+      at least one digit, upper case letter and no special characters.
+    Type: String
+    MinLength: 8
+    MaxLength: 32
+    AllowedPattern: '(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])^([a-zA-Z0-9]{8,32})$'
+    ConstraintDescription: >-
+      Your password must be between 8 and 32 characters, include at least one.
+      digit, upper case letter and no special characters.
+    NoEcho: true
+  ApplicationUsername:
+    Description: >-
+      IMPORTANT: This is the admin username you will use to log into the
+      application, and the password you set below will correspond to this admin
+      username. This is a default value, and can only be changed after you log
+      in.
+    Type: String
+    Default: user
+    AllowedValues:
+      - user
+  AvailabilityZone:
+    Type: 'AWS::EC2::AvailabilityZone::Name'
+    Description: '[Required] Primary Availability Zone for your deployment.'
+    AllowedPattern: ^.+$
+    ConstraintDescription: The Availability Zone cannot be blank.
+  SecondAvailabilityZone:
+    Type: 'AWS::EC2::AvailabilityZone::Name'
+    Description: >-
+      [Required] This RDS deployment requires two availability zones. You must
+      select the Additional Availability Zone to be different than the Primary
+      Availability Zone.
+    AllowedPattern: ^.+$
+    ConstraintDescription: The Additional Availability Zone cannot be blank.
+  DatabasePassword:
+    Description: >-
+      [Required] Aurora database admin password for WordPress - Between 8-32
+      characters; Include at least one digit, upper case letter and no special
+      characters. Please check that the selected instance type is available in
+      your region.
+    Type: String
+    MinLength: 8
+    MaxLength: 32
+    AllowedPattern: '(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])^([a-zA-Z0-9]{8,32})$'
+    ConstraintDescription: >-
+      Your database admin password must be between 8 and 32 characters, include
+      at least one. digit, upper case letter and no special characters.
+    NoEcho: true
+  DatabaseInstanceClass:
+    Description: Select the instance type for your application database.
+    Type: String
+    Default: db.t3.medium
+    AllowedValues:
+      - db.r4.large
+      - db.r4.xlarge
+      - db.r4.2xlarge
+      - db.r4.4xlarge
+      - db.r4.8xlarge
+      - db.r5.large
+      - db.r5.xlarge
+      - db.r5.2xlarge
+      - db.r5.4xlarge
+      - db.r5.8xlarge
+      - db.r5.12xlarge
+      - db.t2.small
+      - db.t2.medium
+      - db.t3.small
+      - db.t3.medium
+  MultiAZ:
+    Description: Create replica in a different Availability zone.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    ConstraintDescription: Multi-AZ must be true or false.
+  ActivateSqlInjectionProtectionParam:
+    Type: String
+    Default: 'yes'
+  ActivateCrossSiteScriptingProtectionParam:
+    Type: String
+    Default: 'yes'
+  ActivateReputationListsProtectionParam:
+    Type: String
+    Default: 'yes'
+  ActivateBadBotProtectionParam:
+    Type: String
+    Default: 'yes'
+  
+Conditions:
+  SqlInjectionProtectionActivated: !Equals
+    - !Ref ActivateSqlInjectionProtectionParam
+    - 'yes'
+
+  CrossSiteScriptingProtectionActivated: !Equals
+    - !Ref ActivateCrossSiteScriptingProtectionParam
+    - 'yes'
+  AlwaysTrue: !Equals 
+    - true
+    - true
+  AddIPRangeSSH: !Not 
+    - !Equals 
+      - !Ref IPRangeSSH
+      - ''
+  AddIPRangeApplication: !Not 
+    - !Equals 
+      - !Ref IPRangeApplication
+      - ''
+  AuroraMultiAZ: !Equals 
+    - !Ref MultiAZ
+    - 'true'
+
+  ReputationListsProtectionActivated: !Equals
+    - !Ref ActivateReputationListsProtectionParam
+    - 'yes'
+
+  BadBotProtectionActivated: !Equals
+    - !Ref ActivateBadBotProtectionParam
+    - 'yes'
+    
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-00e692dfc46181328
+    us-east-2:
+      AMI: ami-0a2f497982b6dda4d
+    us-gov-east-1:
+      AMI: ami-117a9860
+    us-west-1:
+      AMI: ami-0c7c33118d7e0bff4
+    us-gov-west-1:
+      AMI: ami-eda98a8c
+    us-west-2:
+      AMI: ami-002415bcc6084efa9
+    ca-central-1:
+      AMI: ami-0b7eb5e6ba1d12874
+    eu-central-1:
+      AMI: ami-07ff689e6b0da50f2
+    eu-west-1:
+      AMI: ami-06448a3d672c88904
+    eu-west-2:
+      AMI: ami-0fcbdc75f74f95820
+    eu-west-3:
+      AMI: ami-0df6fff7f66ec668f
+    eu-north-1:
+      AMI: ami-0f051c5eb92a45591
+    ap-southeast-1:
+      AMI: ami-013160b5f152c449d
+    ap-southeast-2:
+      AMI: ami-094c7e0c1787eab79
+    ap-south-1:
+      AMI: ami-01a32ec70b5179140
+    ap-northeast-1:
+      AMI: ami-06d669313647d1b02
+    ap-northeast-2:
+      AMI: ami-060e49472ae1e9982
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: f26a425f-3f9a-41bc-857e-acb431b83cf8
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref InternetGatewayName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 06d18584-ca53-42af-af5d-c8f0e3b61e5f
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 19169680-a4b7-4261-886e-1acddb161908
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Public Subnet (AZ1)'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 62c95d3a-9f19-493c-935b-d999b5153c16
+  PublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Public Subnet (AZ2)'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 95c4fcd6-033e-4cf4-8ddb-d9184209f9fd
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Private Subnet (AZ1)'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a47997fe-05a9-4256-8a34-f25a4c1e4eb6
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Private Subnet (AZ2)'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0011e788-a4bb-4898-abd3-637a8f49672f
+  NatGateway1EIP:
+    Type: 'AWS::EC2::EIP'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: cf1e2911-cbeb-47c2-9528-9ac4c985f2f0
+  NatGateway1:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a9ff3f18-4a15-4432-89e3-0d125246d2b7
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Public Routes'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a08d7e12-205f-45df-aae0-92ec242f4ed1
+  DefaultPublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 7668360c-71d4-480b-9cf0-6cacdf256292
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 409bb47b-930b-40b0-bfac-984a0834520a
+  PublicSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: e39aede9-aa38-4c72-ab48-66ccc87d7988
+  PrivateRouteTable1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Private Routes (AZ1)'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: fcd96e42-aa14-44bf-826b-a7ca9301e5b7
+  DefaultPrivateRoute1:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 70cd1dc2-4be5-45cf-b7cf-274140171caf
+  PrivateSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 72ad5623-f5d2-4288-9381-c112089238b7
+  PrivateRouteTable2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName} Private Routes (AZ2)'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 668d8373-3610-4429-a59e-b04fa092b520
+  DefaultPrivateRoute2:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: c02b8bb4-8fd8-4f30-b2ed-041bcbfd920c
+  PrivateSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: efcd7e65-59ff-43ad-9de2-06abcc6bc926
+  LoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Ref LoadBalancerName
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ASGSG
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 63963e57-1879-45d1-b8ca-ef2030b75f95
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Ref TargetGroupName
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 6660276b-51c3-4606-b3a4-6718427f4bfe
+  Listener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: '80'
+      Protocol: HTTP
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 8042b75d-8b23-4695-ba18-b59305a9fe24
+  ASGLaunchConfiguration:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    DependsOn:
+      - DatabaseInstance
+      - InternetGatewayAttachment
+    Properties:
+      AssociatePublicIpAddress: 'true'
+      ImageId: !FindInMap 
+        - RegionMap
+        - !Ref 'AWS::Region'
+        - AMI
+      InstanceType: !Ref InstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvdc
+          Ebs:
+            VolumeType: !Ref InstancesDataDiskType
+            VolumeSize: !Ref InstancesDataDiskSize
+      KeyName: !Ref KeyPair
+      LaunchConfigurationName: !Ref ASGLaunchConfigurationName
+      IamInstanceProfile: !Ref ASGInstanceProfile
+      SecurityGroups:
+        - !Ref FrontendSecurityGroup
+        - !Ref SharedSecurityGroup
+      UserData: !Base64 
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |-
+
+              #PROVISIONER_PEER_PASSWORD_INPUT=
+            - !Ref 'AWS::AccountId'
+            - ' '
+            - !Ref 'AWS::StackId'
+            - ' '
+            - !Ref 'AWS::Region'
+            - |-
+
+              #PROVISIONER_PEER_PASSWORD=
+            - !Ref DatabasePassword
+            - |-
+
+              #PROVISIONER_SHARED_UNIQUE_ID_INPUT=
+            - !Ref 'AWS::AccountId'
+            - ' '
+            - !Ref 'AWS::StackId'
+            - ' '
+            - !Ref 'AWS::Region'
+            - |-
+
+              # PROVISIONER_CFN_RESOURCE=Machine
+            - |-
+
+              # PROVISIONER_CFN_STACK=
+            - !Ref 'AWS::StackName'
+            - |-
+
+              # PROVISIONER_CFN_REGION=
+            - !Ref 'AWS::Region'
+            - |-
+
+              # PROVISIONER_DATA_DISK=/dev/xvdc
+            - |-
+
+              #PROVISIONER_TIER=frontend
+            - |-
+
+              #PROVISIONER_PEER_ADDRESS=
+            - !GetAtt 
+              - DatabaseCluster
+              - Endpoint.Address
+            - |-
+
+              #PROVISIONER_APP_PASSWORD=
+            - !Ref ApplicationPassword
+    Metadata:
+      'AWS::CloudFormation::Init':
+        configSets:
+          default:
+            - 01_setupCfnHup
+            - 02_config-amazon-cloudwatch-agent
+            - 03_restart_amazon-cloudwatch-agent
+          UpdateEnvironment:
+            - 02_config-amazon-cloudwatch-agent
+            - 03_restart_amazon-cloudwatch-agent
+        02_config-amazon-cloudwatch-agent:
+          files:
+            /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json:
+              content: !Sub |
+                {
+                  "metrics": {
+                    "append_dimensions": {
+                      "AutoScalingGroupName": "${!aws:AutoScalingGroupName}",
+                      "ImageId": "${!aws:ImageId}",
+                      "InstanceId": "${!aws:InstanceId}",
+                      "InstanceType": "${!aws:InstanceType}"
+                    },
+                    "aggregation_dimensions" : [["AutoScalingGroupName"]],
+                    "metrics_collected": {
+                      "mem": {
+                        "measurement": [
+                          "mem_used_percent"
+                        ]
+                      }
+                    }
+                  }
+                }
+        03_restart_amazon-cloudwatch-agent:
+          commands:
+            01_stop_service:
+              command: >-
+                /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+                -a stop
+            02_start_service:
+              command: >-
+                /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+                -a fetch-config -m ec2 -c
+                file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+                -s
+        01_setupCfnHup:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                interval=1
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/amazon-cloudwatch-agent-auto-reloader.conf:
+              content: !Sub >
+                [cfn-auto-reloader-hook]
+
+                triggers=post.update
+
+                path=Resources.ASGLaunchConfiguration.Metadata.AWS::CloudFormation::Init.02_config-amazon-cloudwatch-agent
+
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackId}
+                --resource ASGLaunchConfiguration --region ${AWS::Region}
+                --configsets UpdateEnvironment
+
+                runas=root
+              mode: '000400'
+              owner: root
+              group: root
+            /lib/systemd/system/cfn-hup.service:
+              content: |
+                [Unit]
+                Description=cfn-hup daemon
+                [Service]
+                Type=simple
+                ExecStart=/opt/aws/bin/cfn-hup
+                Restart=always
+                [Install]
+                WantedBy=multi-user.target
+          commands:
+            01enable_cfn_hup:
+              command: |
+                systemctl enable cfn-hup.service
+            02start_cfn_hup:
+              command: |
+                systemctl start cfn-hup.service
+      'AWS::CloudFormation::Designer':
+        id: 8ea5a632-01f2-4008-9a44-a66949888711
+  ASGInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: !Sub '${ASGRole}-profile'
+      Roles:
+        - !Ref ASGRole
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: afba8fa8-30ba-42cb-8aec-8950205c0d52
+  ASGRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentAdminPolicy'
+      RoleName: !Ref ASGRoleName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 2b90cce9-a1ab-4eaf-b92a-9d79f7fbc2cb
+  ASGSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Ref SecurityGroupName
+      GroupDescription: Security Group for Bastion Host to allow SSH
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: f57613d6-d694-4f62-96c8-1891553cdae2
+  ASG:
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        PauseTime: PT15M
+        WaitOnResourceSignals: 'true'
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AvailabilityZones:
+        - 'Fn::GetAtt':
+            - PublicSubnet1
+            - AvailabilityZone
+        - 'Fn::GetAtt':
+            - PublicSubnet2
+            - AvailabilityZone
+      LaunchConfigurationName:
+        Ref: ASGLaunchConfiguration
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      MaxSize: '3'
+      MinSize: '1'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 75ea7819-001a-49fe-b3eb-bfced921f3c2
+  SharedSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group for the internal communications
+      SecurityGroupIngress: []
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 886520f9-bdce-4f94-9aca-56f3e109f432
+  SharedSecurityGroupIngress0:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    DependsOn: SharedSecurityGroup
+    Properties:
+      IpProtocol: '-1'
+      FromPort: '3306'
+      ToPort: '3306'
+      SourceSecurityGroupId: !GetAtt 
+        - SharedSecurityGroup
+        - GroupId
+      GroupId: !GetAtt 
+        - SharedSecurityGroup
+        - GroupId
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: cfec0703-92a3-464b-8c7c-a4c442339b71
+  FrontendSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Frontend instance security group
+      SecurityGroupIngress:
+        - !If 
+          - AddIPRangeSSH
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref IPRangeSSH
+          - 'AWS::NoValue'
+        - !If 
+          - AddIPRangeApplication
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: !Ref IPRangeApplication
+          - 'AWS::NoValue'
+        - !If 
+          - AddIPRangeApplication
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: !Ref IPRangeApplication
+          - 'AWS::NoValue'
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 7d7e6211-e513-4429-a7d9-9724b72e5f55
+  DatabaseSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Database instance security group
+      SecurityGroupIngress: []
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: c253a220-6627-4190-b947-84cfa65c1610
+  S3Bucket:
+    DeletionPolicy: Delete
+    Metadata:
+      Comment: Bucket to store some data
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub 'cf-s3-origin-${AWS::StackName}-${AWS::AccountId}'
+    Type: 'AWS::S3::Bucket'
+  S3BucketPolicy:
+    Metadata:
+      Comment: Bucket policy to allow cloudfront to access the data
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - 's3:GetObject'
+            Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CfOriginAccessIdentity.S3CanonicalUserId
+            Resource:
+              - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+    Type: 'AWS::S3::BucketPolicy'
+  DatabaseSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: Database instance subnet group.
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: d286436a-ad12-48b4-81e9-2ada38a6f7bb
+  DatabaseClusterParameterGroup:
+    Type: 'AWS::RDS::DBClusterParameterGroup'
+    Properties:
+      Description: Configure database character set and collation.
+      Family: aurora5.6
+      Parameters:
+        character_set_client: utf8mb4
+        character_set_connection: utf8mb4
+        character_set_results: utf8mb4
+        character_set_server: utf8mb4
+        character_set_database: utf8mb4
+        collation_connection: utf8mb4_general_ci
+        collation_server: utf8mb4_general_ci
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 74a9b71f-20f1-4b10-868e-6996c0c0889f
+  DatabaseCluster:
+    Type: 'AWS::RDS::DBCluster'
+    Properties:
+      Engine: aurora
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      MasterUsername: root
+      MasterUserPassword: !Ref DatabasePassword
+      DBClusterParameterGroupName: !Ref DatabaseClusterParameterGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+        - !Ref SharedSecurityGroup
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 2b31de0a-ca54-48f8-bfcb-134d62c5ca2f
+  DatabaseInstance:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: Delete
+    Properties:
+      Engine: aurora
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceIdentifier: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-DatabaseMachine'
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      Tags:
+        - Value: wordpress-database
+          Key: role
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 474ecb66-0219-4240-8bc1-dbfd0b1816e9
+  DatabaseReplicaInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Condition: AuroraMultiAZ
+    DeletionPolicy: Delete
+    Properties:
+      Engine: aurora
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceIdentifier: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-DatabaseReplicaMachine'
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      Tags:
+        - Value: wordpress-database-replica
+          Key: role
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: b13ac343-1dab-465b-9163-26d7df74a7f8
+  CfDistribution:
+    Metadata:
+      Comment: A simple CloudFront distribution with an S3 origin
+    Properties:
+      DistributionConfig:
+        Comment: A simple distribution with an S3 origin
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - HEAD
+            - GET
+          CachedMethods:
+            - HEAD
+            - GET
+          Compress: false
+          DefaultTTL: 86400
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            Headers:
+              - Origin
+            QueryString: false
+          MaxTTL: 31536000
+          MinTTL: 86400
+          TargetOriginId: ELB Endpoint
+          ViewerProtocolPolicy: allow-all
+        CacheBehaviors:
+          - TargetOriginId: !Sub 's3-origin-${S3Bucket}'
+            AllowedMethods:
+              - HEAD
+              - GET
+            CachedMethods:
+              - HEAD
+              - GET
+            Compress: false
+            DefaultTTL: 86400
+            PathPattern: images/*.jpg
+            ForwardedValues:
+              Cookies:
+                Forward: none
+              Headers:
+                - Origin
+              QueryString: false
+            MaxTTL: 31536000
+            MinTTL: 86400
+            ViewerProtocolPolicy: allow-all
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http1.1
+        IPV6Enabled: false
+        Origins:
+          - DomainName: !GetAtt S3Bucket.DomainName
+            Id: !Sub 's3-origin-${S3Bucket}'
+            OriginPath: ''
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CfOriginAccessIdentity}'
+          - DomainName: !GetAtt LoadBalancer.DNSName
+            Id: ELB Endpoint
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              OriginSSLProtocols:
+                - TLSv1
+                - TLSv1.1
+                - TLSv1.2
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginKeepaliveTimeout: 30
+              OriginReadTimeout: 5
+        PriceClass: PriceClass_All
+        WebACLId: !Ref WAFWebACL
+    Type: 'AWS::CloudFront::Distribution'
+  CfOriginAccessIdentity:
+    Metadata:
+      Comment: Access S3 bucket content only through CloudFront
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: Access S3 bucket content only through CloudFront
+    Type: 'AWS::CloudFront::CloudFrontOriginAccessIdentity'
+  PublicHostedZone:
+    Type: 'AWS::Route53::HostedZone'
+    Properties:
+      HostedZoneConfig:
+        Comment: My hosted zone for example.com
+      Name: !Ref DomainName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: b3ffcf89-780a-4a55-ae38-406d07e4f810
+  ApiRecordSet:
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      AliasTarget:
+        DNSName: !GetAtt CfDistribution.DomainName
+        EvaluateTargetHealth: false
+        HostedZoneId: 'Z2FDTNDATAQYW2'
+      HostedZoneName: !Ref DomainName
+      Comment: A records for my frontends.
+      Name: !Ref SubDomainName
+      Type: A
+    DependsOn: PublicHostedZone
+  WAFWhitelistSet:
+    Type: 'AWS::WAF::IPSet'
+    Properties:
+      Name: !Sub '${EnvironmentName} - Whitelist Set'
+
+  WAFBlacklistSet:
+    Type: 'AWS::WAF::IPSet'
+    Properties:
+      Name: !Sub '${EnvironmentName} - Blacklist Set'
+
+
+  WAFReputationListsSet:
+    Type: 'AWS::WAF::IPSet'
+    Condition: ReputationListsProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - IP Reputation Lists Set'
+
+  WAFBadBotSet:
+    Type: 'AWS::WAF::IPSet'
+    Condition: BadBotProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - IP Bad Bot Set'
+
+  WAFSqlInjectionDetection:
+    Type: 'AWS::WAF::SqlInjectionMatchSet'
+    Condition: SqlInjectionProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - SQL injection Detection'
+      SqlInjectionMatchTuples:
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Authorization
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Authorization
+          TextTransformation: HTML_ENTITY_DECODE
+  WAFWebACL:
+    Type: 'AWS::WAF::WebACL'
+    Properties:
+      Name: !Ref 'EnvironmentName'
+      DefaultAction:
+        Type: ALLOW
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'MaliciousRequesters']]
+      Rules:
+        - Action:
+            Type: ALLOW
+          Priority: 1
+          RuleId: !Ref WAFWhitelistRule
+        - Action:
+            Type: BLOCK
+          Priority: 2
+          RuleId: !Ref WAFBlacklistRule
+        - Action:
+            Type: BLOCK
+          Priority: 3
+          RuleId: !Ref WAFIPReputationListsRule
+        - Action:
+            Type: BLOCK
+          Priority: 4
+          RuleId: !Ref WAFBadBotRule
+        - Action:
+            Type: BLOCK
+          Priority: 5
+          RuleId: !Ref WAFSqlInjectionRule
+        - Action:
+            Type: BLOCK
+          Priority: 6
+          RuleId: !Ref WAFXssRule
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: 'F665'
+            reason: Waf rules
+  WAFXssDetection:
+    Type: 'AWS::WAF::XssMatchSet'
+    Condition: CrossSiteScriptingProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - XSS Detection Detection'
+      XssMatchTuples:
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: HTML_ENTITY_DECODE
+
+  WAFWhitelistRule:
+    Type: 'AWS::WAF::Rule'
+    Properties:
+      Name: !Sub '${EnvironmentName} - Whitelist Rule'
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'WhitelistRule']]
+      Predicates:
+        - DataId: !Ref WAFWhitelistSet
+          Negated: false
+          Type: IPMatch
+
+  WAFBlacklistRule:
+    Type: 'AWS::WAF::Rule'
+    Properties:
+      Name: !Sub '${EnvironmentName} - Blacklist Rule'
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'BlacklistRule']]
+      Predicates:
+        - DataId: !Ref WAFBlacklistSet
+          Negated: false
+          Type: IPMatch
+
+  WAFIPReputationListsRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: ReputationListsProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - WAF IP Reputation Lists Rule'
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'IPReputationListsRule']]
+      Predicates:
+        - DataId: !Ref WAFReputationListsSet
+          Negated: false
+          Type: IPMatch
+
+  WAFBadBotRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: BadBotProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - Bad Bot Rule'
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'BadBotRule']]
+      Predicates:
+        - DataId: !Ref WAFBadBotSet
+          Negated: false
+          Type: IPMatch
+
+  WAFSqlInjectionRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: SqlInjectionProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - SQL Injection Rule'
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'SqlInjectionRule']]
+      Predicates:
+        - DataId: !Ref WAFSqlInjectionDetection
+          Negated: false
+          Type: SqlInjectionMatch
+
+  WAFXssRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: CrossSiteScriptingProtectionActivated
+    Properties:
+      Name: !Sub '${EnvironmentName} - XSS Rule'
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref EnvironmentName]], 'XssRule']]
+      Predicates:
+        - DataId: !Ref WAFXssDetection
+          Negated: false
+          Type: XssMatch
+
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+  PublicSubnets:
+    Description: A list of the public subnets
+    Value: !Join 
+      - ','
+      - - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+  PrivateSubnets:
+    Description: A list of the private subnets
+    Value: !Join 
+      - ','
+      - - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+  PublicSubnet1:
+    Description: A reference to the public subnet in the 1st Availability Zone
+    Value: !Ref PublicSubnet1
+  PublicSubnet2:
+    Description: A reference to the public subnet in the 2nd Availability Zone
+    Value: !Ref PublicSubnet2
+  PrivateSubnet1:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref PrivateSubnet1
+  PrivateSubnet2:
+    Description: A reference to the private subnet in the 2nd Availability Zone
+    Value: !Ref PrivateSubnet2
+  S3BucketName:
+    Description: Bucket name
+    Value: !Ref S3Bucket
+  CfDistributionId:
+    Description: Id for our cloudfront distribution
+    Value: !Ref CfDistribution
+  CfDistributionDomainName:
+    Description: Domain name for our cloudfront distribution
+    Value: !GetAtt CfDistribution.DomainName
+  WAFWhitelistSet:
+    Value: !Ref WAFWhitelistSet
+
+  WAFBlacklistSet:
+    Value: !Ref WAFBlacklistSet
+
+  WAFReputationListsSet:
+    Value: !Ref WAFReputationListsSet
+    Condition: ReputationListsProtectionActivated
+
+  WAFBadBotSet:
+    Value: !Ref WAFBadBotSet
+    Condition: BadBotProtectionActivated
+
+  WAFWhitelistRule:
+    Value: !Ref WAFWhitelistRule
+
+  WAFBlacklistRule:
+    Value: !Ref WAFBlacklistRule
+
+  WAFIPReputationListsRule:
+    Value: !Ref WAFIPReputationListsRule
+    Condition: ReputationListsProtectionActivated
+
+  WAFBadBotRule:
+    Value: !Ref WAFBadBotRule
+    Condition: BadBotProtectionActivated
+
+  WAFSqlInjectionRule:
+    Value: !Ref WAFSqlInjectionRule
+    Condition: SqlInjectionProtectionActivated
+
+  WAFXssRule:
+    Value: !Ref WAFXssRule
+    Condition: CrossSiteScriptingProtectionActivated
